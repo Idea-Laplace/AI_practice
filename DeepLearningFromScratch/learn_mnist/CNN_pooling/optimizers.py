@@ -15,7 +15,7 @@ class SGD(Optimizer):
             params[key] -= self.lr * grads[key]
 
 class Momentum(Optimizer):
-    def __init__(self, lr, momentum = 0.2):
+    def __init__(self, lr, momentum = 0.9):
         super().__init__(lr)
         self.momentum = momentum
         self.v = None
@@ -48,3 +48,34 @@ class AdaGrads(Optimizer):
             params[key] -= self.lr * grads[key] / (np.sqrt(self.h[key]) + self.div_zero)
 
 
+class Adam(Optimizer):
+    def __init__(self, lr=0.001, b1=0.9, b2=0.99):
+        super().__init__(lr)
+        self.b1 = b1
+        self.b2 = b2
+        self.idx = 1
+        self.m = None
+        self.v = None
+
+    def update(self, params, grads):
+        if self.m is None:
+            self.m = {}
+            for key, val in params.items():
+                self.m[key] = np.zeros_like(val)
+                
+        if self.v is None:
+            self.v = {}
+            for key, val in params.items():
+                self.v[key] = np.zeros_like(val)
+        
+        bias_b1 = 1 - (self.b1 ** self.idx)
+        bias_b2 = 1 - (self.b2 ** self.idx)
+        self.idx += 1
+
+        for key in params:
+            self.m[key] = self.b1 * self.m[key] + (1 - self.b1) * grads[key]
+            self.v[key] = self.b2 * self.v[key] + (1 - self.b2) * (grads[key] * grads[key])
+            m_hat = self.m[key] / bias_b1
+            v_hat = self.v[key] / bias_b2
+
+            params[key] -= self.lr * (m_hat / (np.sqrt(v_hat) + 1e-8))
