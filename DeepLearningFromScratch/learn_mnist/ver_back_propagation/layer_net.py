@@ -25,7 +25,7 @@ class TwoLayerNet:
     
         self.layers = OrderedDict()
         self.layers['affine1'] = Affine(self.params['w1'], self.params['b1'])
-        self.layers['sigmoid'] = Sigmoid()
+        self.layers['relu'] = ReLu()
         self.layers['affine2'] = Affine(self.params['w2'], self.params['b2'])
 
         self.output_layer = SoftmaxLoss()
@@ -71,7 +71,7 @@ class TwoLayerNet:
         return grads
 
     
-    def learning(self, img_batch: np.ndarray, idx_batch: np.ndarray, lr=0.01):
+    def learning(self, img_batch: np.ndarray, idx_batch: np.ndarray, lr=0.001):
         predict = self.predict(img_batch)
         loss = self.loss(img_batch, idx_batch)
         accuracy = self.accuracy(img_batch, idx_batch)
