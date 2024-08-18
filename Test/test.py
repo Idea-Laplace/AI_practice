@@ -4,7 +4,7 @@ sys.path.append(os.pardir)
 import numpy as np
 from Variables.variable import *
 from Functions.function import *
-
+from Configurations.configuration import *
 
 # ~/AI_practice/MyFramework/Variables/variable.py
 
@@ -93,7 +93,7 @@ class AddTest(unittest.TestCase):
         sample0, sample1 = np.array(3), np.array(2)
         x0 = Variable(sample0)
         x1 = Variable(sample1)
-        y = add(x0, x1)
+        y = x0 + x1
 
         self.assertEqual(y.data, np.array(5))
 
@@ -101,7 +101,7 @@ class AddTest(unittest.TestCase):
         sample0, sample1 = np.array(3.), np.array(2.)
         x0 = Variable(sample0)
         x1 = Variable(sample1)
-        y = add(x0, x1)
+        y = x0 + x1
         y.backward()
 
         self.assertEqual(x0.grad, y.grad)
@@ -116,15 +116,17 @@ class MultiplyTest(unittest.TestCase):
         sample0, sample1 = np.array(3.0), np.array(2.0)
         x0 = Variable(sample0)
         x1 = Variable(sample1)
-        y = mul(x0, x1)
+        y = x0 * x1
 
         self.assertEqual(y.data, np.array(3.0 * 2.0))
+
+
 
     def test_backward(self):
         sample0, sample1 = np.array(3.0), np.array(2.0)
         x0 = Variable(sample0)
         x1 = Variable(sample1)
-        y = mul(x0, x1)
+        y = x0 * x1
         y.backward()
 
         self.assertEqual(x0.grad, np.array(x1.data * y.grad))
@@ -136,13 +138,13 @@ class MultiplyTest(unittest.TestCase):
 # ----------------------------------------------------------------------
 class ScalarNetworkTest(unittest.TestCase):
     def test_composite_function(self):
-        coefficient_exp = np.array(2.0)
-        coefficient_bias = np.array(9.0)
-        coefficient_0 = np.array(-1.0)
-        coefficient_1 = np.array(3.0)
-        coefficient_2 = np.array(-3.0)
-        coefficient_3 = np.array(1.0)
-        variable_x = np.array(2.0)
+        coefficient_exp = 2.0
+        coefficient_bias = 9.0
+        coefficient_0 = 1.0
+        coefficient_1 = 3.0
+        coefficient_2 = 3.0
+        coefficient_3 = 1.0
+        variable_x = 2.0
 
         A = Variable(coefficient_exp)
         B = Variable(coefficient_bias)
@@ -153,15 +155,14 @@ class ScalarNetworkTest(unittest.TestCase):
         x = Variable(variable_x)
 
         pol_term0 = d
-        pol_term1 = mul(c, x)
-        pol_term2 = mul(b, x, x)
-        pol_term3 = mul(a, x, x, x)
-        polynomial = add(pol_term0, pol_term1, pol_term2, pol_term3)
+        pol_term1 = c * x
+        pol_term2 = b * x ** 2
+        pol_term3 = a * x ** 3
+        polynomial = pol_term3 - pol_term2 + pol_term1 - pol_term0
 
-        # y = 5*exp((x-1)^3) + 9
-        # y' = 15((x-1)^2)exp((x-1)^3)
+        # y = 2*exp((x-1)^3) + 9
         
-        y = add(mul(A, exp(polynomial)), B)
+        y = exp(polynomial) / A + B
         y.backward()
 
         def dummy(A, B, a, b, c, d, x):
@@ -169,21 +170,26 @@ class ScalarNetworkTest(unittest.TestCase):
             pol_term1 = mul(c, x)
             pol_term2 = mul(b, x, x)
             pol_term3 = mul(a, x, x, x)
-            polynomial = add(pol_term0, pol_term1, pol_term2, pol_term3)
-            y = add(mul(A, exp(polynomial)), B)
+            polynomial = pol_term3 - pol_term2 + pol_term1 - pol_term0
+            y = add(div(exp(polynomial), A), B)
 
             return y
 
 
         vars = [polynomial, pol_term0, pol_term1, pol_term2, pol_term3, a, b, c, d, x]
+        print()
         print(y.data)
-        print(y.creator)
         dump = lambda x: dummy(A, B, a, b, c, d, x)
         for var in vars:
             print(var.grad)
         self.assertTrue(np.allclose(x.grad, numerical_gradient(dump, x)))
 
 
+class InterchangabilityTest(unittest.TestCase):
+    def test_variable2ndarray(self):
+        var_sample = Variable(np.array(2.0))
+        arr_sample = 3.0
+        print(arr_sample - var_sample)
 
 if __name__ == '__main__':
     unittest.main()
