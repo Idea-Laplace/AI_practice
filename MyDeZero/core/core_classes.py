@@ -24,7 +24,12 @@ Variable:
 
 class Variable:
     def __init__(self, data: np.ndarray, name = None):
-        self.data = as_array(data)
+        if data is not None and not isinstance(data, np.ndarray):
+            self.data = np.array(data)
+            if not np.issubdtype(self.data.dtype, np.number):
+                raise TypeError(f'{type(data)} is not supported.')
+        else:
+            self.data = data
         self.name = name
         self.grad = None
         self.creator = None
@@ -45,7 +50,7 @@ class Variable:
 
     @property
     def dtype(self):
-        return self.dat.dtype
+        return self.data.dtype
     
     def __len__(self):
         return len(self.data)
@@ -75,6 +80,11 @@ class Variable:
             self.grad = np.ones_like(self.data)
 
         #-------------------------------------------------
+        # Since functions are actually callable classes,
+        # although two 'Function's seem to do same subroutine,
+        # they are actually 'different' instances, which would not happen
+        # when they are merely of a type of function, not a type of callable classes.
+        # They are same with each other only when different variable shares same creator.
         functions = []
         seen_functions = set()
 
@@ -90,7 +100,6 @@ class Variable:
         while functions:
             func = functions.pop()
             # Call the most recent called Variable instances
-            # Warning: y may not be the instance that would call this method.
 
             # func.outputs is guaranteed that it is of type tuple
             # func.outputs consists of weakref.ref element
@@ -98,16 +107,16 @@ class Variable:
             grad_xs = func.backward(*grad_ys)
 
             if not isinstance(grad_xs, tuple):
-                grad_xs = (grad_xs, )
+                grad_xs = (grad_xs,)
                 
             for x, grad_x in zip(func.inputs, grad_xs):
                 if x.grad is None:
-                    x.grad = grad_x
+                    x.grad = as_array(grad_x)
                 else:
                     # You should not write as x.grad += grad_x, as it could cause
                     # influence on other Variable.grad, especially when x.grad is
                     # initialized directly on another Variable.grad.
-                    x.grad = x.grad + grad_x
+                    x.grad = as_array(x.grad + grad_x)
 
                 # If there are many multi-variable functions in the
                 # chain of a neuron system heirarchy, the 'functions'
