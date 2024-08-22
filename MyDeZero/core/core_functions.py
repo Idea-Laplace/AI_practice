@@ -1,48 +1,26 @@
 import numpy as np
-from .core_classes import *
+from MyDeZero.core.core_classes import *
 
 # Subclasses of 'Function' ----------------------------------------------
 class Add(Function):
-    def forward(self, *xs) -> np.ndarray:
-        xs = [as_array(x) for x in xs]
-        y = sum(xs)
-
+    def forward(self, x0, x1) -> np.ndarray:
+        x1 = as_array(x1)
+        y  = x0 + x1
         return y
 
     def backward(self, grad_y: np.ndarray) -> np.ndarray:
-        grad_xs = (grad_y,) * len(self.inputs)
-
-        return grad_xs
+        return grad_y, grad_y
 
 
 class Multiply(Function):
-    def forward(self, *xs) -> np.ndarray:
-        xs = [as_array(x) for x in xs]
-        y = None
-        for x in xs:
-            if y is None:
-                # The copy() method is essential since then input should not be changed.
-                y = x.copy()
-            else:
-                y *= x
+    def forward(self, x0, x1) -> np.ndarray:
+        x1 = as_array(x1)
+        y = x0 * x1
         return y
 
-    def backward(self, grad_y: np.ndarray) -> np.ndarray:
-        xs = [input.data for input in self.inputs]
-
-        grad_xs = []
-        for i in range(len(xs)):
-            # list slicing is relatively robust to index range
-            temp = xs[:i] + xs[i+1:]
-            grad_x = None
-            for x_r in temp:
-                if grad_x is None:
-                    grad_x = x_r.copy()
-                else:
-                    grad_x *= x_r
-            grad_xs.append(grad_x * grad_y)
-
-        return tuple(grad_xs)
+    def backward(self, grad_y):
+        x0, x1 = self.inputs
+        return grad_y * x1, grad_y * x0
 
 class Negation(Function):
     def forward(self, x):
@@ -53,7 +31,6 @@ class Negation(Function):
 
 class Subtraction(Function):
     def forward(self, x0, x1):
-        # for rsub
         x1 = as_array(x1)
         y = x0 - x1
         return y
@@ -63,14 +40,13 @@ class Subtraction(Function):
 
 class Division(Function):
     def forward(self, x0, x1):
-        # for rdiv
         x1 = as_array(x1)
         # Division zero error is already implemented in the numpy module.
         y = x0 / x1
         return y
     
     def backward(self, grad_y):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        x0, x1 = self.inputs
         grad_x0 = grad_y / x1
         grad_x1 = grad_y * (-x0 / x1 ** 2)
         return grad_x0, grad_x1
@@ -85,11 +61,125 @@ class Power(Function):
         return y
     
     def backward(self, grad_y):
-        x = self.inputs[0].data
+        x = self.inputs[0]
         c = self.c
-        grad_x = grad_y * c * x ** (c - 1)
+        grad_x =  c * x ** (c - 1) * grad_y
         return grad_x
 
+
+class Reshape(Function):
+    def __init__(self, shape):
+        self.shape = shape
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        self.x_shape = x.shape
+        y = x.reshape(self.shape)
+        return y
+
+    def backward(self, grad_y: Variable) -> Variable:
+        return reshape(grad_y, self.x_shape)
+
+
+class Transpose(Function):
+    def __init__(self, axes=None):
+        self.axes = axes
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        y = x.transpose(self.axes)
+        return y
+    
+    def backward(self, grad_y: Variable) -> Variable:
+        if self.axes is None:
+            return transpose(grad_y)
+        else:
+            axes_len = len(self.axes)
+            # The part '% axes_len' is for when negative index is used.
+            # The argsort method returns an np.ndarray, 
+            inv_axes = tuple(np.argsort([ax % axes_len for ax in self.axes]))
+            return transpose(grad_y, inv_axes)
+
+
+class Sum(Function):
+    def __init__(self, axis, keepdims: bool):
+        self.axis = axis
+        self.keepdims = keepdims
+
+    def forward(self, x:np.ndarray) -> np.ndarray:
+        self.x_shape = x.shape
+        return x.sum(axis=self.axis, keepdims=self.keepdims)
+    
+    def backward(self, grad_y: Variable) -> Variable:
+        grad_y = reshape_sum_backward(grad_y, self.x_shape, self.axis,\
+                                      self.keepdims)
+        grad_x = broadcast_to(grad_y, self.x_shape)
+        return grad_x
+
+class BroadcastTo(Function):
+    def __init__(self, shape):
+        self.shape = shape
+    
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        self.x_shape = x.shape
+        y = np.broadcast_to(x, self.shape)
+        return y
+    
+    def backward(self, grad_y: Variable) -> Variable:
+        grad_x = sum_to(grad_y, self.x_shape)
+        return grad_x
+
+
+# Do not confuse with 'Sum' or 'Add'
+class SumTo(Function):
+    def __init__(self, shape):
+        self.shape = shape
+
+    def forward(self, x):
+        self.x_shape = x.shape
+        ndim = len(self.shape)
+        # ndim should be not larger than x.ndim
+        lead = x.ndim - ndim
+        # if lead = 0, lead_axis is (), an empty tuple
+        # axes that outdimension that of self.shape
+        lead_axis = tuple(range(lead))
+
+        # 'lead'is added to each element of 'axis' to make sure that
+        # the lead_axis is followed by 'axis' in x
+        # When sx == 1, the broadcasting would have been done on x
+        axis = tuple([i + lead for i, sx in enumerate(self.shape) if sx == 1])
+        y = x.sum(lead_axis + axis, keepdims=True)
+        if lead > 0:
+            # Since keepdims remains dummy dimensions, this is needed
+            y = y.squeeze(lead_axis)
+        return y   
+    
+    def backward(self, grad_y):
+        grad_x = broadcast_to(grad_y, self.x_shape)
+        return grad_x
+
+
+class MatrixMul(Function):
+    def forward(self, x: np.ndarray, W: np.ndarray) -> np.ndarray:
+        y = x.dot(W)
+        return y
+    
+    def backward(self, grad_y: Variable) -> Variable:
+        if grad_y.ndim == 1:
+            wrap_grad_y = grad_y.reshape(1, -1)
+
+        x, W = self.inputs
+        if W.ndim == 1:
+            WT = W.reshape(1, -1).T
+        else:
+            WT = W.T
+
+        if x.ndim == 1:
+            xT = x.reshape(1, -1).T
+        else:
+            xT = x.T
+
+        grad_x = mat_mul(wrap_grad_y, WT)
+        grad_W = mat_mul(xT, wrap_grad_y)
+        return grad_x, grad_W
 
 # Supportive functions --------------------------------------------
 
@@ -100,11 +190,11 @@ just a scalar type, not a numpy array, which is desired.
 To avoid this, the following as_array function checks whether the
 output is scalar or not, and converts it to a numpy array if necessary.
 '''
-def add(*xs: Variable) -> Variable:
-    return Add()(*xs)
+def add(x0: Variable, x1: Variable) -> Variable:
+    return Add()(x0, x1)
 
-def mul(*xs: Variable) -> Variable:
-    return Multiply()(*xs)
+def mul(x0: Variable, x1:Variable) -> Variable:
+    return Multiply()(x0, x1)
 
 def neg(x: Variable) -> Variable:
     return Negation()(x)
@@ -123,6 +213,30 @@ def rdiv(x0, x1) -> Variable:
 
 def pow(x, c) -> Variable:
     return Power(c)(x)
+
+def reshape(x, shape) -> Variable:
+    if x.shape == shape:
+        return as_variable(x)
+    return Reshape(shape)(x)
+
+def transpose(x: Variable, axes=None) -> Variable:
+    return Transpose(axes)(x)
+
+def sum(x: Variable, axis=None, keepdims=False) -> Variable:
+    return Sum(axis, keepdims)(x)
+
+def broadcast_to(x: Variable, shape):
+    if x.shape == shape:
+        return as_variable(x)
+    return BroadcastTo(shape)(x)
+
+def sum_to(x, shape):
+    if x.shape == shape:
+        return as_variable(x)
+    return SumTo(shape)(x)
+
+def mat_mul(x, W):
+    return MatrixMul()(x, W)
 
 def numerical_gradient(f: Function, *xs: Variable):
     eps = 1e-5
@@ -148,3 +262,30 @@ def numerical_gradient(f: Function, *xs: Variable):
         grads.append(grad_x)
 
     return tuple(grads)
+
+def reshape_sum_backward(grad_y, x_shape, axis, keepdims):
+    ndim = len(x_shape)
+    # Make the type of axis consistent with tuple---
+    tupled_axis = axis
+    if axis is None:
+        tupled_axis = None
+    elif not isinstance(axis, tuple):
+        tupled_axis = (axis,)
+    #\-----------------------------------------------
+
+    # When the 'keepdims' is concerned.
+    # Even though keepdims is false, that would be meaningless
+    # if ndim is 0(which make the sum mere scalar)
+    # or if axis is None(ditto.)
+    if not (ndim == 0 or tupled_axis is None or keepdims):
+        # Make 'negative' axis into positive.
+        actual_axis = [a if a >= 0 else a + ndim for a in tupled_axis]
+        shape = list(grad_y.shape)
+        # Before broadcasting, restore dimensions as if the sum invoked with 'keepdims=True'
+        for a in sorted(actual_axis):
+            shape.insert(a, 1)
+    else:
+        shape = grad_y.shape
+
+    grad_y = grad_y.reshape(shape)  # reshape
+    return grad_y

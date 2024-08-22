@@ -1,6 +1,8 @@
 import numpy as np
 import weakref
-from .configuration import *
+import MyDeZero
+from MyDeZero.core.configuration import *
+
 
 '''
 Variable:
@@ -52,6 +54,10 @@ class Variable:
     def dtype(self):
         return self.data.dtype
     
+    @property
+    def ndim(self):
+        return self.data.ndim
+    
     def __len__(self):
         return len(self.data)
     
@@ -62,6 +68,22 @@ class Variable:
             repr = str(self.data).replace('\n', '\n' + ' ' * len('Variable('))
             return 'Variable(' + repr + ')'
     
+    def reshape(self, *shape):
+        # When an user enter a shape as a form of tuple or list.
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = shape[0]
+        return MyDeZero.core.core_functions.reshape(self, shape)
+    
+    def transpose(self, *axes):
+        return MyDeZero.core.core_functions.transpose(self, tuple(axes))
+    
+    @property
+    def T(self):
+        return MyDeZero.core.core_functions.transpose(self)
+    
+    def sum(self, axis=None, keepdims=False):
+        return MyDeZero.core.core_functions.sum(self, axis, keepdims)
+
 
     # /For user usability-----------------------------
 
@@ -75,9 +97,9 @@ class Variable:
         self.grad = None
 
     # retain_grad is for memory.
-    def backward(self, retain_grad=Configuration.retain_grad):
+    def backward(self, retain_grad=Configuration.retain_grad, create_graph=True):
         if self.grad is None:
-            self.grad = np.ones_like(self.data)
+            self.grad = Variable(np.ones_like(self.data))
 
         #-------------------------------------------------
         # Since functions are actually callable classes,
@@ -100,32 +122,33 @@ class Variable:
         while functions:
             func = functions.pop()
             # Call the most recent called Variable instances
-
             # func.outputs is guaranteed that it is of type tuple
             # func.outputs consists of weakref.ref element
             grad_ys = [output().grad for output in func.outputs]
-            grad_xs = func.backward(*grad_ys)
 
-            if not isinstance(grad_xs, tuple):
-                grad_xs = (grad_xs,)
-                
-            for x, grad_x in zip(func.inputs, grad_xs):
-                if x.grad is None:
-                    x.grad = as_array(grad_x)
-                else:
-                    # You should not write as x.grad += grad_x, as it could cause
-                    # influence on other Variable.grad, especially when x.grad is
-                    # initialized directly on another Variable.grad.
-                    x.grad = as_array(x.grad + grad_x)
+            with using_config('enable_backpropagation', create_graph):
+                grad_xs = func.backward(*grad_ys)
 
-                # If there are many multi-variable functions in the
-                # chain of a neuron system heirarchy, the 'functions'
-                # list would be of an abstract 'tree' structure.
-                if x.creator is not None:
-                    # The functions are arranged according to generation
-                    # This process guarantees that no variables of lower generation
-                    # would not get their gradient until those of higher generation get over.
-                    add_function(x.creator)
+                if not isinstance(grad_xs, tuple):
+                    grad_xs = (grad_xs,)
+                    
+                for x, grad_x in zip(func.inputs, grad_xs):
+                    if x.grad is None:
+                        x.grad = grad_x
+                    else:
+                        # You should not write as x.grad += grad_x, as it could cause
+                        # influence on other Variable.grad, especially when x.grad is
+                        # initialized directly on another Variable.grad.
+                        x.grad = x.grad + grad_x
+
+                    # If there are many multi-variable functions in the
+                    # chain of a neuron system heirarchy, the 'functions'
+                    # list would be of an abstract 'tree' structure.
+                    if x.creator is not None:
+                        # The functions are arranged according to generation
+                        # This process guarantees that no variables of lower generation
+                        # would not get their gradient until those of higher generation get over.
+                        add_function(x.creator)
             
             # After all the gradients of input variables are gained,
             # the used up output gradients, which would only just waste memories in many cases,
@@ -170,7 +193,7 @@ class Function:
         # Extracting data to apply to the method 'forward'
         # The 'inputs' is matained after call only when backpropagation mode is true.
         # Wraps np.ndarrays with a Variable class.
-        inputs = [as_variable(input) for input in inputs]
+        inputs = [as_variable(input) for input in inputs] # inputs: list of Variables
         xs = [x.data for x in inputs]
         ys = self.forward(*xs)
 
