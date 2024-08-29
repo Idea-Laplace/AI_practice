@@ -6,7 +6,7 @@ from Variables.variable import *
 from Functions.function import *
 from Configurations.configuration import *
 
-# ~/AI_practice/MyFramework/Variables/variable.py
+# ~/AI_practice/MyDeZero/Variables/variable.py
 
 class VariableTest(unittest.TestCase):
     def test_init(self):
@@ -23,7 +23,7 @@ class VariableTest(unittest.TestCase):
         self.assertEqual(y.data, np.exp(x.data))
 
 
-# ~/AI_practice/MyFramework/Functions/function.py
+# ~/AI_practice/MyDeZero/Functions/function.py
 
 def numerical_gradient(f: Function, x: Variable):
     eps = 1e-5

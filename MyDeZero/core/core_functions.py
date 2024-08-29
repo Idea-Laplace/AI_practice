@@ -165,6 +165,8 @@ class MatrixMul(Function):
     def backward(self, grad_y: Variable) -> Variable:
         if grad_y.ndim == 1:
             wrap_grad_y = grad_y.reshape(1, -1)
+        else:
+            wrap_grad_y = grad_y
 
         x, W = self.inputs
         if W.ndim == 1:
@@ -180,6 +182,61 @@ class MatrixMul(Function):
         grad_x = mat_mul(wrap_grad_y, WT)
         grad_W = mat_mul(xT, wrap_grad_y)
         return grad_x, grad_W
+
+
+class LinearTransfrom(Function):
+    def forward(self, x, W, b=None):
+        self.x = x
+        self.W = W
+        
+        y = np.dot(x, W)
+        if b is not None:
+            y += b
+
+        return y
+
+    def backward(self, grad_y: Variable) -> Variable:
+        x, W, b = self.inputs
+        grad_x = mat_mul(grad_y, W.T)
+        grad_W = mat_mul(x.T, grad_y)
+        grad_b = None if b.data is None else sum_to(grad_y, b.shape)
+
+        return grad_x, grad_W, grad_b
+
+
+class GetItem(Function):
+    def __init__(self, slices: np.ndarray):
+        self.slices = slices
+    
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        y = x[self.slices]
+        return y
+    
+    def backward(self, grad_y: Variable) -> Variable:
+        x, = self.inputs
+        func = GetItemGrad(self.slices, x.shape)
+        return func(grad_y)
+
+
+class GetItemGrad(Function):
+    def __init__(self, slices, in_shape):
+        self.slices = slices
+        self.in_shape = in_shape
+    
+    def forward(self, grad_ydata: np.ndarray) -> np.ndarray:
+        # Restore the shape of an input
+        grad_xdata = np.zeros(self.in_shape)
+        # Sum would accumulated if slices called an index duplicatively.
+        # Number of elements in grad_ydata should be same with the number of slices.
+        # elements in grad_ydata are called just the way that an iteration calls
+        np.add.at(grad_xdata, self.slices, grad_ydata)
+        return grad_xdata
+    
+    def backward(self, grad_grad_x: Variable) -> Variable:
+        return get_item(grad_grad_x, self.slices)
+
+
+
 
 # Supportive functions --------------------------------------------
 
@@ -238,8 +295,13 @@ def sum_to(x, shape):
 def mat_mul(x, W):
     return MatrixMul()(x, W)
 
-def numerical_gradient(f: Function, *xs: Variable):
-    eps = 1e-5
+def linear_transform(x, W, b=None):
+    return LinearTransfrom()(x, W, b)
+
+def get_item(x, slices):
+    return GetItem(slices)(x)
+
+def numerical_gradient(f: Function, *xs: Variable, eps=1e-5):
     # Use ravel(), not flatten(), as ravel() indicates the same instance but view it as flat.
     # Even if the x is of ndim zero, the ravel automatically cast x_flatten into ndim 1
     grads = []
@@ -250,6 +312,7 @@ def numerical_gradient(f: Function, *xs: Variable):
     # The algorithm of this 'numerical_gradient' refers to the 'centered divided difference' method.
     # ,in which the formula is represented by f'(x) = lim_(h->0)[(f(x+h) - f(x-h)) / (2*h)]
         for i in range(x_flatten.size):
+            temp = x_flatten[i]
             x_flatten[i] += eps
             fxr = f(*xs)
             
@@ -257,11 +320,12 @@ def numerical_gradient(f: Function, *xs: Variable):
             fxl = f(*xs)
 
             grad_x[i] = (fxr.data - fxl.data) / (2 * eps) 
+            x_flatten[i] = temp
     
         grad_x = grad_x.reshape(x.data.shape)
         grads.append(grad_x)
 
-    return tuple(grads)
+    return tuple(grads) if len(grads) > 1 else grads[0]
 
 def reshape_sum_backward(grad_y, x_shape, axis, keepdims):
     ndim = len(x_shape)
@@ -289,3 +353,14 @@ def reshape_sum_backward(grad_y, x_shape, axis, keepdims):
 
     grad_y = grad_y.reshape(shape)  # reshape
     return grad_y
+
+def dropout(x, dropout_ratio=0.5):
+    x = as_variable(x)
+
+    if Configuration.train:
+        mask = np.random.rand(*x.shape) > dropout_ratio
+        scale = np.array(1.0 - dropout_ratio).astype(x.dtype)
+        y = mask / scale
+        return y
+    else:
+        return x

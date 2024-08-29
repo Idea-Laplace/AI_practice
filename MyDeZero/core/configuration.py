@@ -3,6 +3,7 @@ import contextlib
 class Configuration:
     retain_grad = True
     enable_backpropagation = True
+    train = True
 '''
 For an instance to be capable of being with 'with',
 it must have two magic method, __enter__ and __exit__.
@@ -41,3 +42,6 @@ def no_backpropagation():
 
 def no_intermediate_grad():
     return using_config('retain_grad', False)
+
+def test_mode():
+    return using_config('train', False)

@@ -1,7 +1,12 @@
-from MyDeZero import Variable
+from MyDeZero import Variable, as_variable
+from MyDeZero.core.common_functions import *
+from MyDeZero.core.core_functions import *
 from MyDeZero import numerical_gradient
 from MyDeZero import get_dot_graph, plot_dot_graph
+import matplotlib.pyplot as plt
+
 import numpy as np
+import math
 
 def sphere(x: Variable, y: Variable):
     z = x**2 + y**2
@@ -36,38 +41,150 @@ def normalization(*xs: Variable) -> tuple[Variable]:
         norm_x.name = f'normalized_x{i}'
     return output
 
+def taylor_sin(x: Variable, threshold=1e-150):
+    y = 0
+    i = 0
+    while True:
+        c = (-1)**i / math.factorial(2*i + 1)
+        t = c * x**(2*i + 1)
+        y = y + t
+        i += 1
+    
+        if abs(t.data) < threshold:
+            break
+    return y
 
-x = Variable(1.0, 'x')
-y = Variable(1.0, 'y')
-z = sphere(x, y)
-z.backward()
+def rosenbrock(x0: Variable, x1: Variable, coeff: tuple[int]=(100, 1)) -> Variable:
+    y = coeff[0]*(x1 - x0**2)**2 + coeff[1]*(1 - x0)**2
+    return y
 
-x.clear_grad(), y.clear_grad()
-print((x.grad, y.grad))
+def temp_subroutine(newton_method=True):
+    x0 = Variable(0.0)
+    x1 = Variable(2.0)
+    lr = 0.001
+    iters = 10
 
+    x0s, x1s = [], []
 
-z = matyas(x, y)
-z.backward()
-print(x.grad, y.grad)
+    for i in range(iters):
 
-x.clear_grad(), y.clear_grad()
-z = Goldstein_Price(x, y)
-z.name = 'z'
-z.backward()
-print(z.data)
-print((x.grad, y.grad))
+        y = rosenbrock(x0, x1)
+        x0s.append(as_variable(x0.data.copy()))
+        x1s.append(as_variable(x1.data.copy()))
+        x0.clear_grad()
+        x1.clear_grad()
 
-#gold_graph = get_dot_graph(z, verbose=True)
-#plot_dot_graph(z, 'goldstein.png')
+        y.backward()
+        if newton_method:
+            gx0 = x0.grad
+            gx1 = x1.grad
+            x0.clear_grad()
+            x1.clear_grad()
+            gx0.backward()
+            gx1.backward()
+            gx0_2 = x0.grad
+            gx1_2 = x1.grad
+            x0.data -= gx0.data / gx0_2.data
+            x1.data -= gx1.data / gx1_2.data
+        else:
+            x0.data -= lr * x0.grad.data
+            x1.data -= lr * x1.grad.data
+        
 
-nu_grads = numerical_gradient(Goldstein_Price, x, y)
-print(nu_grads)
+    return x0s, x1s
+    
+'''
+x = np.arange(-1, 1, 0.01)
+y = np.arange(-1, 2, 0.01)
+x_m, y_m = grid = np.meshgrid(x, y)
+z = 100 * (y_m - x_m**2)**2 + (1 - x_m)**2
+fig = plt.figure()
+g1 = fig.add_subplot(111, projection='3d')
+g1.plot_surface(x_m, y_m, z, color='lightblue')
 
-x0 = Variable(0.0, 'x0')
-x1 = Variable(1.0, 'x1') 
-x2 = Variable(2.0, 'x2')
-x3 = Variable(3.0, 'x3')
-x4 = Variable(4.0, 'x4')
-z = normalization(x0, x1, x2, x3, x4)
+x0s = []
+x1s = []
+x0s, x1s = temp_subroutine()
+rosen = []
+for x0, x1 in zip(x0s, x1s):
+    rosen.append(rosenbrock(x0, x1) +1)
+x0s = [x0.data for x0 in x0s]
+x1s = [x1.data for x1 in x1s]
+rosen = [y.data for y in rosen]
+g1.plot(x0s, x1s, rosen, color='r', linewidth=5)
+
+plt.show()
+'''
+
+'''
+x = Variable(np.linspace(-7, 7, 200))
+y = sin(x)
+y.backward(create_graph=True)
+
+logs = [y.data]
+
+for i in range(3):
+    logs.append(x.grad.data)
+    gx = x.grad
+    x.clear_grad()
+    gx.backward(create_graph=True)
+    print(i)
+
+labels =  ['y=sin(x)', 'y`', 'y``', 'y```']
+for i, v in enumerate(logs):
+    plt.plot(x.data, logs[i], label=labels[i])
+plt.legend(loc='lower right')
+plt.show()
+'''
+'''
+x = Variable(1.0)
+y = tanh(x)
+x.name = 'x'
+y.name = 'y'
+y.backward(create_graph=True)
+
+iters = 6
+
+for i in range(iters):
+    grad_x = x.grad
+    x.clear_grad()
+    grad_x.backward(create_graph=True)
+
+grad_x = x.grad
+grad_x.name = 'grad_x' + str(iters+1)
+plot_dot_graph(grad_x, verbose=False, to_file='tanh.png')
+'''
+
+'''
+a = Variable(np.array([1, 2, 3, 4]))
+b = a.reshape(2, 2)
+print(a)
+print(b)
+
+a = Variable(np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]]))
+b = a.transpose(2, 0, 1)
+print(b)
+c = Transpose((2, 0, 1))
+d = c.backward(b)
+print(d)
+
+e = a.sum(axis=0, keepdims=True)
+print(e)
+'''
+
+'''
+a = Variable(np.array([1, 2, 3]))
+b = broadcast_to(a, (3, 3, 3))
+b.backward()
+print(b)
+c = sum_to(b, (1,3))
+print(c)
+'''
+
+w = Variable(np.array([[1, 2, 3], [4, 5, 6]]))
+x = Variable(np.array([2, 1]))
+z = mat_mul(x, w)
 print(z)
-plot_dot_graph(z[0], verbose=True, to_file='normalization.png')
+z.backward()
+print(x.grad)
+print(w.grad)
