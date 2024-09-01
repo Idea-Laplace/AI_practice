@@ -1,11 +1,15 @@
 import numpy as np
+import cupy as cp
+from MyDeZero.cuda import cuda
 
 def _get_conv_outsize(input_size: int, kernel_size: int,\
                      stride: int, pad: int):
     return (input_size + 2 * pad - kernel_size) // stride + 1
 
-def _im2col(image: np.ndarray, kernel_shape: tuple[int],\
+def _im2col(image, kernel_shape: tuple[int],\
            stride: int=1, pad: int=0):
+    
+    xp = cuda.get_array_module(image)
 
     assert image.ndim == 4
     '''
@@ -22,12 +26,12 @@ def _im2col(image: np.ndarray, kernel_shape: tuple[int],\
     OW = _get_conv_outsize(W, KW, stride, pad)
     blocks_per_image = OH * OW
     block_size = C * KH * KW
-    columned_image = np.zeros((N * blocks_per_image, block_size), dtype=image.dtype)
+    columned_image = xp.zeros((N * blocks_per_image, block_size), dtype=image.dtype)
     
     # Padding
     if pad > 0:
         pad_width = ((0, 0), (0, 0), (pad, pad), (pad, pad))
-        padded_image = np.pad(image, pad_width, mode='constant', constant_values=0)
+        padded_image = xp.pad(image, pad_width, mode='constant', constant_values=0)
     else:
         padded_image = image
     
@@ -36,8 +40,7 @@ def _im2col(image: np.ndarray, kernel_shape: tuple[int],\
         h_end = h_start + KH
         w_start = (i % OH) * stride
         w_end = w_start + KW
-        block = padded_image[:, :, h_start:h_end, w_start:w_end]
-        flatten_block = block.reshape(N, -1)
+        flatten_block = padded_image[:, :, h_start:h_end, w_start:w_end].reshape(N, -1)
         columned_image[i::blocks_per_image] = flatten_block
     
     return columned_image
@@ -48,11 +51,12 @@ def _col2im(col: np.ndarray, restore_shape: tuple[int],\
            stride: int=1, pad: int=0,\
            mode: str='backward'):
     
+    xp = cuda.get_array_module(col)
     N, C, H, W = restore_shape
     KH, KW = kernel_shape
     OH = _get_conv_outsize(H, KH, stride, pad)
     OW = _get_conv_outsize(W, KW, stride, pad)
-    padded_image = np.zeros((N, C, H + 2 * pad, W + 2 * pad), dtype=col.dtype)
+    padded_image = xp.zeros((N, C, H + 2 * pad, W + 2 * pad), dtype=col.dtype)
 
     blocks_per_image = col.shape[0] // N
     for i in range(blocks_per_image):
@@ -74,7 +78,7 @@ def _col2im(col: np.ndarray, restore_shape: tuple[int],\
     return image
 
 if __name__ == '__main__':
-    x = np.random.randint(1, 9, size=(1, 1, 5, 5))
+    x = cp.random.randint(1, 9, size=(1, 1, 5, 5))
     print(x)
     col_x = _im2col(x, (3, 3), 2)
     print(col_x)

@@ -1,20 +1,19 @@
 import numpy as np
 from MyDeZero.core.core_classes import *
+from MyDeZero.cuda import cuda
 
 # Subclasses of 'Function' ----------------------------------------------
 class Add(Function):
-    def forward(self, x0, x1) -> np.ndarray:
-        x1 = as_array(x1)
+    def forward(self, x0, x1):
         y  = x0 + x1
         return y
 
-    def backward(self, grad_y: np.ndarray) -> np.ndarray:
+    def backward(self, grad_y):
         return grad_y, grad_y
 
 
 class Multiply(Function):
-    def forward(self, x0, x1) -> np.ndarray:
-        x1 = as_array(x1)
+    def forward(self, x0, x1):
         y = x0 * x1
         return y
 
@@ -31,7 +30,6 @@ class Negation(Function):
 
 class Subtraction(Function):
     def forward(self, x0, x1):
-        x1 = as_array(x1)
         y = x0 - x1
         return y
     
@@ -40,7 +38,6 @@ class Subtraction(Function):
 
 class Division(Function):
     def forward(self, x0, x1):
-        x1 = as_array(x1)
         # Division zero error is already implemented in the numpy module.
         y = x0 / x1
         return y
@@ -71,7 +68,7 @@ class Reshape(Function):
     def __init__(self, shape):
         self.shape = shape
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
         self.x_shape = x.shape
         y = x.reshape(self.shape)
         return y
@@ -84,7 +81,7 @@ class Transpose(Function):
     def __init__(self, axes=None):
         self.axes = axes
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
         y = x.transpose(self.axes)
         return y
     
@@ -92,10 +89,11 @@ class Transpose(Function):
         if self.axes is None:
             return transpose(grad_y)
         else:
+            xp = cuda.get_array_module(grad_y.data)
             axes_len = len(self.axes)
             # The part '% axes_len' is for when negative index is used.
-            # The argsort method returns an np.ndarray, 
-            inv_axes = tuple(np.argsort([ax % axes_len for ax in self.axes]))
+            # The argsort method returns an xp.ndarray, 
+            inv_axes = tuple(xp.argsort([ax % axes_len for ax in self.axes]))
             return transpose(grad_y, inv_axes)
 
 
@@ -104,7 +102,7 @@ class Sum(Function):
         self.axis = axis
         self.keepdims = keepdims
 
-    def forward(self, x:np.ndarray) -> np.ndarray:
+    def forward(self, x):
         self.x_shape = x.shape
         return x.sum(axis=self.axis, keepdims=self.keepdims)
     
@@ -118,9 +116,10 @@ class BroadcastTo(Function):
     def __init__(self, shape):
         self.shape = shape
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
+        xp = cuda.get_array_module(x)
         self.x_shape = x.shape
-        y = np.broadcast_to(x, self.shape)
+        y = xp.broadcast_to(x, self.shape)
         return y
     
     def backward(self, grad_y: Variable) -> Variable:
@@ -158,7 +157,7 @@ class SumTo(Function):
 
 
 class MatrixMul(Function):
-    def forward(self, x: np.ndarray, W: np.ndarray) -> np.ndarray:
+    def forward(self, x, W):
         y = x.dot(W)
         return y
     
@@ -186,10 +185,11 @@ class MatrixMul(Function):
 
 class LinearTransfrom(Function):
     def forward(self, x, W, b=None):
+        xp = cuda.get_array_module(x)
         self.x = x
         self.W = W
         
-        y = np.dot(x, W)
+        y = xp.dot(x, W)
         if b is not None:
             y += b
 
@@ -205,10 +205,10 @@ class LinearTransfrom(Function):
 
 
 class GetItem(Function):
-    def __init__(self, slices: np.ndarray):
+    def __init__(self, slices):
         self.slices = slices
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
         y = x[self.slices]
         return y
     
@@ -223,13 +223,14 @@ class GetItemGrad(Function):
         self.slices = slices
         self.in_shape = in_shape
     
-    def forward(self, grad_ydata: np.ndarray) -> np.ndarray:
+    def forward(self, grad_ydata):
+        xp = cuda.get_array_module(grad_ydata)
         # Restore the shape of an input
-        grad_xdata = np.zeros(self.in_shape)
+        grad_xdata = xp.zeros(self.in_shape)
         # Sum would accumulated if slices called an index duplicatively.
         # Number of elements in grad_ydata should be same with the number of slices.
         # elements in grad_ydata are called just the way that an iteration calls
-        np.add.at(grad_xdata, self.slices, grad_ydata)
+        xp.add.at(grad_xdata, self.slices, grad_ydata)
         return grad_xdata
     
     def backward(self, grad_grad_x: Variable) -> Variable:
@@ -248,24 +249,30 @@ To avoid this, the following as_array function checks whether the
 output is scalar or not, and converts it to a numpy array if necessary.
 '''
 def add(x0: Variable, x1: Variable) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Add()(x0, x1)
 
 def mul(x0: Variable, x1:Variable) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Multiply()(x0, x1)
 
 def neg(x: Variable) -> Variable:
     return Negation()(x)
 
 def sub(x0, x1) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Subtraction()(x0, x1)
 
 def rsub(x0, x1) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Subtraction()(x1, x0)
 
 def div(x0, x1) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Division()(x0, x1)
 
 def rdiv(x0, x1) -> Variable:
+    x1 = as_array(x1, cuda.get_array_module(x0.data))
     return Division()(x1, x0)
 
 def pow(x, c) -> Variable:
@@ -302,12 +309,13 @@ def get_item(x, slices):
     return GetItem(slices)(x)
 
 def numerical_gradient(f: Function, *xs: Variable, eps=1e-5):
+    xp = cuda.get_array_module(xs[0])
     # Use ravel(), not flatten(), as ravel() indicates the same instance but view it as flat.
     # Even if the x is of ndim zero, the ravel automatically cast x_flatten into ndim 1
     grads = []
     for x in xs:
         x_flatten = x.data.ravel()
-        grad_x = np.zeros_like(x_flatten)
+        grad_x = xp.zeros_like(x_flatten)
 
     # The algorithm of this 'numerical_gradient' refers to the 'centered divided difference' method.
     # ,in which the formula is represented by f'(x) = lim_(h->0)[(f(x+h) - f(x-h)) / (2*h)]
@@ -355,12 +363,14 @@ def reshape_sum_backward(grad_y, x_shape, axis, keepdims):
     return grad_y
 
 def dropout(x, dropout_ratio=0.5):
+    xp = cuda.get_array_module(x)
     x = as_variable(x)
 
     if Configuration.train:
-        mask = np.random.rand(*x.shape) > dropout_ratio
-        scale = np.array(1.0 - dropout_ratio).astype(x.dtype)
+        mask = xp.random.rand(*x.shape) > dropout_ratio
+        scale = xp.array(1.0 - dropout_ratio).astype(x.dtype)
         y = mask / scale
         return y
     else:
         return x
+

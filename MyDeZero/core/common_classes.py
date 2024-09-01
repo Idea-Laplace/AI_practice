@@ -1,4 +1,5 @@
 import numpy as np
+from MyDeZero.cuda import cuda
 from MyDeZero import Layer, Parameter, Variable, Optimizer
 import MyDeZero.utilities.utils as utils
 import MyDeZero.core.common_functions as cmf
@@ -10,34 +11,38 @@ import MyDeZero.convolution_pooling.convolution as conv
 class Linear(Layer):
     def __init__(self, output_size: int,\
                  input_size=None,\
-                 nobias: bool=False,\
-                 dtype=np.float32):
+                 nobias: bool=False):
         super().__init__()
         self.input_size = input_size
         self.output_size = output_size
-        self.dtype = dtype
 
         self.W = Parameter(None, name='W')
         if self.input_size is not None:
             self._init_W()
-        
+
         if nobias:
             self.b = None
         else:
-            self.b = Parameter(np.zeros(output_size, dtype=dtype), name='b')
+            self.b = Parameter(None, name='b')
+        
     
-    def _init_W(self):
+    def _init_W(self, module=np):
         I, O = self.input_size, self.output_size
-        W_data = np.random.randn(I, O).astype(self.dtype) * np.sqrt(1 / I)
+        W_data = module.random.randn(I, O).astype(self.dtype) * module.sqrt(1 / I)
         self.W.data = W_data
     
     def forward(self, x):
+        xp = cuda.get_array_module(x)
+        self.dtype = xp.float32
+        if self.b.data is None:
+            self.b.data = xp.zeros(self.output_size, dtype=self.dtype)
+
         if self.W.data is None:
             if x.ndim == 1:
                 x = x.reshape(1, -1)
             # Number of columns of x == number of rows of self.W.data
             self.input_size = x.shape[1]
-            self._init_W()
+            self._init_W(xp)
         
         y = crf.linear_transform(x, self.W, self.b)
         return y
@@ -45,14 +50,13 @@ class Linear(Layer):
 
 class Conv2d(Layer):
     def __init__(self, out_channels, kernel_shape, stride=1,\
-                pad=0, nobias=False, dtype=np.float32, in_channels=None):
+                pad=0, nobias=False, in_channels=None):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_shape = kernel_shape
         self.stride = stride
         self.pad = pad
-        self.dtype = dtype
 
         self.W = Parameter(None, name='W')
         if in_channels is not None:
@@ -61,21 +65,28 @@ class Conv2d(Layer):
         if nobias:
             self.b = None
         else:
-            self.b = Parameter(np.zeros(out_channels, dtype=dtype), name='b')
+            self.b = Parameter(None, name='b')
         
-    def _init_W(self):
+    def _init_W(self, module=np):
         C, OC = self.in_channels, self.out_channels
         KH, KW = self.kernel_shape
-        scale = np.sqrt(1 / (C * KH * KW))
-        W_data = scale * np.random.randn(OC, C, KH, KW).astype(self.dtype)
+        scale = module.sqrt(1 / (C * KH * KW))
+        # The conceptual shape of W is OC, C, KH, KW, however, when actual operation
+        # undergoes with shape of W.reshape(OC, -1).T, which is represented below.
+        W_data = scale * module.random.randn(C * KH * KW, OC).astype(self.dtype)
         self.W.data = W_data
     
     def forward(self, x):
+        xp = cuda.get_array_module(x)
+        self.dtype = xp.float32
+        if self.b.data is None:
+            self.b.data = xp.zeros(self.out_channels, dtype=self.dtype)
+
         if self.W.data is None:
             self.in_channels = x.shape[1]
-            self._init_W()
-        KH, KW = self.W.shape[2:]
-        y = cmf.Convolution((KH, KW), self.stride, self.pad)(x, self.W, self.b)
+            self._init_W(xp)
+        KH, KW = self.kernel_shape
+        y = cmf.Convolution((KH, KW), self.stride, self.pad, block_w=False)(x, self.W, self.b)
 
         return y
             

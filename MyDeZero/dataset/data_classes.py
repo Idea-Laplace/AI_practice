@@ -1,4 +1,5 @@
 import numpy as np
+from MyDeZero.cuda import cuda
 import math
 import random
 import os
@@ -68,13 +69,14 @@ class BigData(Dataset):
 
 #-----------------------------------------------------------------------------------
 class DataLoader:
-    def __init__(self, dataset, batch_size: int, shuffle=True):
+    def __init__(self, dataset, batch_size: int, shuffle=True, gpu=False):
         # dataset should have definition for __getitem__ and __len__ magic methods
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.data_size = len(dataset)
         self.max_iter = math.ceil(self.data_size / batch_size)
+        self.gpu = gpu
         self.reset()
     
     def reset(self):
@@ -96,14 +98,21 @@ class DataLoader:
         i, batch_size = self.iteration, self.batch_size
         batch_index = self.index[i * batch_size : (i + 1) * batch_size]
         batch = [self.dataset[i] for i in batch_index]
-        x = np.array([example[DATA] for example in batch])
-        t = np.array([example[LABEL] for example in batch])
+        xp = cuda.cupy if self.gpu else np
+        x = xp.array([example[DATA] for example in batch])
+        t = xp.array([example[LABEL] for example in batch])
 
         self.iteration += 1
         return x, t
     
     def next(self):
         return self.__next__()
+    
+    def to_cpu(self):
+        self.gpu = False
+
+    def to_gpu(self):
+        self.gpu = True
 
 #-------------------------------------------------------------------------
 class Spiral(Dataset):

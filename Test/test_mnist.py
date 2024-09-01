@@ -2,7 +2,10 @@ from MyDeZero.dataset.data_classes import MNIST, DataLoader, one_hot, FastMNIST
 from MyDeZero.core.common_classes import MLP, Adam, SGD, MomentumSGD
 from MyDeZero.core.common_functions import *
 from MyDeZero.core.core_functions import *
+from MyDeZero.cuda import cuda
 import matplotlib.pyplot as plt
+import cupy as cp
+import numpy as np
 
 train_set = FastMNIST(train=True,\
                 transform=lambda x: x.flatten(),\
@@ -22,6 +25,12 @@ model1 = MLP((100, 10), activation=relu, normal=True)
 model2 = MLP((100, 10), activation=relu, normal=False)
 optimizer1 = Adam(0.001).setup(model1)
 optimizer2 = Adam(0.001).setup(model2)
+
+if cuda.gpu_enable:
+    train_loader.to_gpu()
+    model1.to_gpu()
+    model2.to_gpu()
+    
 
 idx = 0
 y_loss1 = []

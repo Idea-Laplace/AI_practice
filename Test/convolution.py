@@ -26,20 +26,20 @@ if mode == 'Conv2d':
     nu_grad_w = numerical_gradient(func_w, test_conv.W, eps=1e-4)
     nu_grad_b = numerical_gradient(func_b, test_conv.b, eps=1e-4)
     print(x.grad)
-    print(nu_grad_x[0])
+    print(nu_grad_x)
     print()
 
     print(test_conv.W.grad)
-    print(nu_grad_w[0])
+    print(nu_grad_w)
     print()
 
     print(test_conv.b.grad)
-    print(nu_grad_b[0])
+    print(nu_grad_b)
     print()
 
-    print((nu_grad_x[0]/x.grad).sum()/x.grad.size)
-    print((nu_grad_w[0]/test_conv.W.grad).sum()/test_conv.W.grad.size)
-    print((nu_grad_b[0]/test_conv.b.grad).sum()/test_conv.b.grad.size)
+    print((nu_grad_x/x.grad).sum()/x.grad.size)
+    print((nu_grad_w/test_conv.W.grad).sum()/test_conv.W.grad.size)
+    print((nu_grad_b/test_conv.b.grad).sum()/test_conv.b.grad.size)
 
 elif mode == 'pool':
     test_pool = Pooling((2, 2), 1, 0)

@@ -3,6 +3,12 @@ import numpy as np
 import weakref
 import MyDeZero
 from MyDeZero.core.configuration import *
+from MyDeZero.cuda import cuda
+try:
+    import cupy
+    array_types = (np.ndarray, cupy.ndarray)
+except ImportError:
+    array_types = (np.ndarray,)
 
 
 '''
@@ -27,7 +33,7 @@ Variable:
 
 class Variable:
     def __init__(self, data: np.ndarray, name=None):
-        if data is not None and not isinstance(data, np.ndarray):
+        if data is not None and not isinstance(data, array_types):
             self.data = np.array(data)
             if not np.issubdtype(self.data.dtype, np.number):
                 raise TypeError(f'{type(data)} is not supported.')
@@ -108,11 +114,20 @@ class Variable:
 
     def clear_grad(self):
         self.grad = None
+    
+    def to_cpu(self):
+        if self.data is not None:
+            self.data = cuda.as_numpy(self.data)
+
+    def to_gpu(self):
+        if self.data is not None:
+            self.data = cuda.as_cupy(self.data)
 
     # retain_grad is for memory.
     def backward(self, retain_grad=Configuration.retain_grad, create_graph=True):
         if self.grad is None:
-            self.grad = Variable(np.ones_like(self.data))
+            xp = cuda.get_array_module(self.data)
+            self.grad = Variable(xp.ones_like(self.data))
 
         #-------------------------------------------------
         # Since functions are actually callable classes,
@@ -153,7 +168,6 @@ class Variable:
                         # influence on other Variable.grad, especially when x.grad is
                         # initialized directly on another Variable.grad.
                         x.grad = x.grad + grad_x
-                    
 
                     # If there are many multi-variable functions in the
                     # chain of a neuron system heirarchy, the 'functions'
@@ -253,9 +267,9 @@ def as_variable(x: np.ndarray) -> Variable:
     else:
         return Variable(x)
 
-def as_array(x) -> np.ndarray:
+def as_array(x, array_module=np) -> np.ndarray:
     if np.isscalar(x):
-        return np.array(x)
+        return array_module.array(x)
     else:
         return x
 
@@ -330,18 +344,29 @@ class Layer:
                 yield from obj.params()
             else:
                 yield obj
+
+    def to_cpu(self):
+        for param in self.params():
+            param.to_cpu()
+
+    def to_gpu(self):
+        for param in self.params():
+            param.to_gpu()
+
     
     def _flatten_params(self, params_dict, parent_key=''):
         for name in self._params:
             obj = self.__dict__[name]
             key = parent_key + '/' + name if parent_key else name
 
-        if isinstance(obj, Layer):
-            obj._flatten_params(params_dict, key)
-        else:
-            params_dict[key] = obj
-    
+            if isinstance(obj, Layer):
+                obj._flatten_params(params_dict, key)
+            else:
+                params_dict[key] = obj
+        
     def save_weights(self, path):
+        self.to_cpu()
+
         params_dict = {}
         self._flatten_params(params_dict)
         array_dict = {key: param.data for key, param in params_dict.items()
@@ -360,6 +385,7 @@ class Layer:
         self._flatten_params(params_dict)
         for key, param in params_dict.items():
             param.data = npz[key]
+            print(f'{key} is loaded.')
     
     def clear_grads(self):
         for param in self.params():
